@@ -1,0 +1,186 @@
+<?php
+/**
+ * Implements hook_schema().
+ */
+function tycoon_cc_ammado_schema() {
+  $schema['tycoon_cc_ammado_orders'] = array(
+    // Table to hold ammado transacton data
+    'description'=>'Table for Ammado orders',
+    'fields'=>array(
+      'amid'=>array(
+        'description' => 'Primary key: the internal id for ammado transactions',
+        'type' => 'serial',
+        'not null' =>   TRUE,
+        'unsigned' => TRUE,
+        ),
+      'txid'=>array(
+        'description' => 'Causecast transaction id for this Ammado order',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' =>   TRUE,
+        'default' => 0,
+        ),
+
+      'flavor'=>array(
+        'description' => 'The flavor of ammado transaction we want:  widget or api',
+        'type' => 'char',
+        'length' => 10,
+        'not null' =>   TRUE,
+        'default' => "widget",
+        ),
+
+      'order_id'=>array(
+        'description' => 'Ammado\'s order ID for this transaction',
+        'type' => 'varchar',
+        'length' => 128,
+        'not null' => TRUE,
+        'default' => ' ',
+        ),
+
+      'order_status'=>array(
+        'description' => 'Ammado\'s order status for this transaction',
+        'type' => 'varchar',
+        'length' => 128,
+        'not null' => TRUE,
+        'default' => ' ',
+        ),
+
+      'order_date'=>array(
+        'description' => 'ISO 8601 date: YYYY-MM-DD',
+        'type' => 'char',
+        'length' => 10,
+        'not null' => TRUE,
+        'default' => '0000-00-00',
+        ),
+
+      'currency_code'=>array(
+        'description' => '3 uppercase ISO currency code for this transaction',
+        'type' => 'char',
+        'length' => 3,
+        'not null' => TRUE,
+        'default' => 'USD',
+        ),
+
+      'donation_amount' => array(
+        'description' => 'Donation amount for this transaction',
+        'type' => 'numeric',
+        'precision' => 10,
+        'scale' => 2,
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0.00,
+      ),
+      'timestamp'=>array(
+        'description' => 'Unix timestamp when this entry was created',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' =>   TRUE,
+        'default' => 0,
+        ),
+
+      'beneficiary_array'=>array(
+        'description' => 'Serialized array of beneficiary ids',
+        'type' => 'text',
+        'size' => 'medium',
+         ),
+
+      'aeid'=>array(
+        'description' => 'Index to ammado API endpoint for this transaction',
+        'type' => 'int',
+         'unsigned' => TRUE,
+        'not null' =>   TRUE,
+        'default' => 0,
+        ),
+
+
+
+
+      ),
+      'primary key' => array('amid'),
+      'indexes' => array( 'account' => array('aeid'),
+                          'timestamp' => array('timestamp'),
+                         'transaction' => array('txid')
+                        ),
+    );
+  $schema['tycoon_cc_ammado_endpoints'] = array(
+    // Table to hold monthly invoices
+    'description'=>'Table of ammado accounts and endpoints',
+    'fields'=>array(
+      'aeid'=>array(
+        'description' => 'Primary key: the endpoint number',
+        'type' => 'serial',
+        'not null' =>   TRUE,
+        'unsigned' => TRUE,
+        ),
+      'endpoint'=>array(
+        'description' => 'API endpoint for this account',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' =>   TRUE,
+        'default' => ' ',
+        ),
+
+      'widget_code'=>array(
+        'description' => 'Widget code for this endpoint',
+        'type' => 'text',
+        'size' => 'medium',
+        ),
+
+      'billing_id'=>array(
+        'description' => 'Causecast billing id for this endpoint',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' =>   TRUE,
+        'default' => ' ',
+        ),
+      ),
+      'primary key' => array('aeid'),
+      'indexes' => array('endpoint' => array('endpoint')
+                          ,'billing_id' => array('billing_id')),
+    );
+ return $schema;
+}
+
+function tycoon_cc_ammado_install() {
+    // If the default endpoint data are not in the database, put them there.
+
+
+    // The default data are stored at 0
+    $query="SELECT * FROM {tycoon_cc_ammado_endpoints} WHERE "
+        ."aeid = 0";
+    $res = db_query($query);
+    $db_record = $res->fetchAssoc();
+
+    if (!$db_record){
+      // No default record, put one in based upon the config settings
+
+      $aeid = db_insert('tycoon_cc_ammado_endpoints')
+        ->fields(array(
+              'aeid' => 0,
+              'endpoint' => ((isset($conf['cc_am_endpoint']))?$conf['cc_am_endpoint']:'https://api.ammadodemo.com/v1/'),
+              'widget_code' => ((isset($conf['cc_am_widget_code']))?$conf['cc_am_widget_code']:'<div id="ammadoGivingWidget"></div>'
+                                                    .'<script type="text/javascript">'
+                                                    ."var s = document.createElement('script'); s.type='text/javascript'; "
+                                                    ."s.async=true;"
+                                                    ."s.src='https://www.ammadodemo.com/company/636/givingwidget/embed.js?renderTo=ammadoGivingWidget';"
+                                                    ."var f = document.getElementsByTagName('script')[0]; f.parentNode.insertBefore(s, f);</script>"),
+              'billing_id' => 'default'
+            ))
+        ->execute();
+
+        $nuid = db_update('tycoon_cc_ammado_endpoints')
+          ->fields(array('aeid'=>0))
+          ->condition('aeid',$aeid)
+          ->execute();
+
+    }
+
+}
+
+function tycoon_cc_ammado_uninstall() {
+  drupal_uninstall_schema('tycoon_cc_ammado_endpoints');
+  drupal_uninstall_schema('tycoon_cc_ammado_orders');
+}
+
+
+?>

@@ -1,0 +1,178 @@
+<?php
+
+
+/**
+ * Implements hook_requirements().
+ */
+function tycoon_cc_ammado_requirements($phase) {
+  module_load_include('inc', 'tycoon_cc_ammado', 'tycoon_cc_ammado');
+
+  $requirements = array();
+  // Ensure translations don't break at install time
+  $t = get_t();
+
+  return $requirements;
+}
+
+
+/**
+ * Implements hook_tycoon_pay_method_info().
+ */
+function tycoon_cc_ammado_tycoon_pay_method_info() {
+  $info = array(
+    'tycoon_cc_ammado_widget' => array(
+      'label' => t('Ammado Widget Checkout'),
+      'description' => t('Ammado Widget Checkout payment method.'),
+      'controller class' => 'TycoonCCAmmadoWidgetMethod',
+      'file' => 'ammado_widget.inc',
+      'file path' => drupal_get_path('module', 'tycoon_cc_ammado') . '/includes',
+    ),
+  );
+  return $info;
+}
+
+
+/**
+ * Implements hook_cron().
+ */
+function tycoon_cc_ammado_cron() {
+  // Grab the unsettled transactions
+  $result = db_select('tycoon_cc_ammado_orders','tcao')
+    ->fields('tcao',array('txid'))
+    ->condition('order_id',' ','!=')
+    ->condition('order_status',array('pending','due_refund',' ',''),'IN')
+    ->execute();
+
+
+    while ($order = $result->fetch()) {
+      /* Load the Transaction*/
+      $txn = TycoonTransaction::load($order->txid);
+      $txn->pay_method->ammado->load_by_txid($order->txid);
+
+      // update the order status by calling the API.
+
+      $status = $txn->pay_method->update_order_status();
+      $data = array();
+
+      if (!is_null($status)){
+
+//         drupal_set_message("<pre>\nStatus array is not null\n</pre>",'status');
+
+        // If this is the first time through this process, validate the
+        // transaction.
+
+        if ($txn->state() == 'pending') $txn->do_action('validate',$data);
+
+        // depending on the order status, update the transaction status
+        switch ($status['orderStatus']) {
+         case 'successful':
+            $message="The order was processed successfully and monies can be or "
+              ."have already been disbursed to the beneficiaries.";
+            $txn->do_action('succeed',$data);
+            break;
+         case 'pending':
+            $message="The transaction was successful but the order is still "
+              ."being processed. It can resolve into either successful or "
+              ."cancelled if/when ammado receive the monies. This state is "
+              ."currently only relevant for donations made using an ammado "
+              ."giving voucher.";
+            if (isset($status['donationAmount']) && isset($status['currencyCode'])
+                && isset($status['beneficiaryId'])
+                && in_array($txn->state(), array('validated','pending')))
+                  $txn->do_action('process',$data);
+            break;
+         case 'refunded':
+            $message="The transaction was refunded to the donor. No payment will be made to the beneficiaries.";
+            $txn->do_action('refund',$data);
+            break;
+         case 'due_refund':
+            $message="The transaction is in the process of being refunded to the donor. It will resolve into refunded once the donor has received the monies.";
+            $txn->do_action('refund',$data);
+            break;
+         case 'charged_back':
+            $message="A credit card chargeback occured. No payment will be made to the beneficiaries.";
+            $txn->do_action('refund',$data);
+            break;
+         case 'cancelled':
+            $message="The transaction was cancelled by the donor, ammado or the Payment Processor. No payment will be made to the beneficiaries.";
+            $txn->do_action('cancel',$data);
+            break;
+         case 'error':
+            $message="An unexpected fatal error occured during processing. No payment will be made to the beneficiaries.";
+            $txn->do_action('error',$data);
+            break;
+         default:
+            $message="Unkown status ".$status['orderStatus'];
+            $txn->do_action('error',$data);
+        }
+      } else {
+        $message = "<pre>\nStatus array is null.\n</pre>";
+        $txn->do_action('cancel',$data);
+      }
+//
+
+//    drupal_set_message($message,'status');
+//    drupal_set_message( '<pre>'.var_export($status, true).'</pre>'
+//         , 'status'
+//         );
+//    drupal_set_message( '<pre>'.var_export($txn->pay_method->ammado, true).'</pre>'
+//         , 'status'
+//         );
+
+    }
+
+ //  $query = "select * from {tycoon_cc_ammado_orders} where
+//    order_id != ' ' AND order_status != 'complete'";
+
+}
+
+
+
+/**
+ * Implements hook_tycoon_webapi_info().
+ */
+function tycoon_cc_ammado_tycoon_webapi_info() {
+  $base = array(
+    'handler' => 'AmmadoTycoon',
+  );
+  return array(
+   'getInternationalDonateButton' => array(
+      'callback' => 'get_international_donate_button',
+      'method' => array('post', 'get'),
+      'formats' => array('json'),
+      'required fields' => array('mail'),
+    ) + $base,
+  );
+}
+
+
+/**
+ * Alter transaction actions.
+ * Add our new actions specifically for payroll deduction and employer matching.
+ */
+function tycoon_cc_ammado_tycoon_action_info_alter(&$actions) {
+  // Change process finished state to 'processed'
+  $actions['process']['finished'] = 'processed';
+
+  // The succeed action: processed, pending -> complete
+  $actions['succeed']['label'] = t('Succeed');
+  $actions['succeed']['handler'] = 'TycoonActionSucceed';
+  $actions['succeed']['states'] = array('pending','processed','validated');
+  $actions['succeed']['finished'] = 'complete';
+
+  // The process action: validated, pending -> processed
+  $actions['process']['label'] = t('Process');
+  $actions['process']['handler'] = 'TycoonActionProcess';
+  $actions['process']['states'] = array('pending','validated');
+  $actions['process']['finished'] = 'processed';
+
+  // The cancel action: invoiced -> canceled
+  $actions['cancel']['label'] = t('Cancel');
+  $actions['cancel']['handler'] = 'TycoonActionCancel';
+  $actions['cancel']['finished'] = 'canceled';
+  $actions['cancel']['states'] = array('pending','validated','processed');
+
+}
+
+
+

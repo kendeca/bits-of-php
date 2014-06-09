@@ -1,0 +1,15 @@
+name = Ammado pay methods
+description = Supports the Ammado pay methods for tycoon pay API.
+package = Tycoon
+core = 7.x
+
+dependencies[] = tycoon_credit
+
+; Includes
+files[] = tycoon_cc_ammado.inc
+files[] = includes/ammado.inc
+files[] = includes/ammado_widget.inc
+
+; Tycoon Action Handlers
+files[] = handlers/ammado.inc
+files[] = handlers/TycoonActionSucceed.inc
